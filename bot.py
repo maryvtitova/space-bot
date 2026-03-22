@@ -1,5 +1,6 @@
 import logging
 import os
+import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
@@ -14,8 +15,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8472876024:AAEwRhPT2Ed45E5uDUnOG7v63CL2u10oWwg")
-
+BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
 MANAGER_TG = "@mary_eeee"
 MANAGER_PHONE = "+7 (903) 157-05-47"
 
@@ -98,7 +98,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     text = (
         "👋 Добро пожаловать в каталог помещений и готовых арендных бизнесов!\n\n"
         "Здесь вы найдёте:\n"
-        "🏢 Помещения — в аренду и в продажу\n"
+        "🏢 Помещения — в аренду и на продажу\n"
         "🏪 Готовый бизнес — объекты с действующими арендаторами\n\n"
         "Выберите действие:"
     )
@@ -115,82 +115,51 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     if data == "noop":
         return
-
     if data == "main_menu":
         await start(update, ctx)
         return
-
     if data == "contact":
         await q.edit_message_text(
-            f"📞 Свяжитесь с нашим менеджером:\n\n"
-            f"Telegram: {MANAGER_TG}\n"
-            f"Телефон: {MANAGER_PHONE}\n\n"
-            f"Ответим в течение 30 минут 🕐",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")
-            ]])
+            f"📞 Свяжитесь с нашим менеджером:\n\nTelegram: {MANAGER_TG}\nТелефон: {MANAGER_PHONE}\n\nОтветим в течение 30 минут 🕐",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")]])
         )
         return
-
     if data == "browse_all":
         ctx.user_data["active_listings"] = LISTINGS
         ctx.user_data["page"] = 0
         await show_listings(q, LISTINGS, 0)
         return
-
     if data.startswith("page_"):
         page = int(data.split("_")[1])
         ctx.user_data["page"] = page
         listings = ctx.user_data.get("active_listings", LISTINGS)
         await show_listings(q, listings, page)
         return
-
     if data == "filter_start":
         ctx.user_data["filters"] = {}
-        await q.edit_message_text(
-            "🔍 Шаг 1 из 3 — Тип сделки\n\nЧто вас интересует?",
-            reply_markup=filter_deal_kb(ctx.user_data["filters"])
-        )
+        await q.edit_message_text("🔍 Шаг 1 из 3 — Тип сделки\n\nЧто вас интересует?", reply_markup=filter_deal_kb({}))
         return
-
     if data in ("deal_rent", "deal_buy"):
         ctx.user_data.setdefault("filters", {})["deal"] = data.split("_")[1]
-        await q.edit_message_text(
-            "🔍 Шаг 1 из 3 — Тип сделки\n\nЧто вас интересует?",
-            reply_markup=filter_deal_kb(ctx.user_data["filters"])
-        )
+        await q.edit_message_text("🔍 Шаг 1 из 3 — Тип сделки\n\nЧто вас интересует?", reply_markup=filter_deal_kb(ctx.user_data["filters"]))
         return
-
     if data == "filter_next_tenant":
-        await q.edit_message_text(
-            "🔍 Шаг 2 из 3 — Арендатор\n\nНужен объект с действующим арендатором?",
-            reply_markup=filter_tenant_kb(ctx.user_data.get("filters", {}))
-        )
+        await q.edit_message_text("🔍 Шаг 2 из 3 — Арендатор\n\nНужен объект с действующим арендатором?", reply_markup=filter_tenant_kb(ctx.user_data.get("filters", {})))
         return
-
     if data in ("tenant_with", "tenant_without", "tenant_any"):
         ctx.user_data.setdefault("filters", {})["tenant"] = data.split("_")[1]
-        await q.edit_message_text(
-            "🔍 Шаг 2 из 3 — Арендатор\n\nНужен объект с действующим арендатором?",
-            reply_markup=filter_tenant_kb(ctx.user_data["filters"])
-        )
+        await q.edit_message_text("🔍 Шаг 2 из 3 — Арендатор\n\nНужен объект с действующим арендатором?", reply_markup=filter_tenant_kb(ctx.user_data["filters"]))
         return
-
     if data == "filter_next_price":
-        await q.edit_message_text(
-            "🔍 Шаг 3 из 3 — Бюджет\n\nВыберите максимальную цену:",
-            reply_markup=filter_price_kb()
-        )
+        await q.edit_message_text("🔍 Шаг 3 из 3 — Бюджет\n\nВыберите максимальную цену:", reply_markup=filter_price_kb())
         return
-
     if data.startswith("price_"):
         parts = data.split("_")
         if parts[1] == "any":
             ctx.user_data.setdefault("filters", {})["price_max"] = None
         else:
             ctx.user_data.setdefault("filters", {})["price_max"] = int(parts[2])
-        f = ctx.user_data.get("filters", {})
-        results = apply_filters(LISTINGS, f)
+        results = apply_filters(LISTINGS, ctx.user_data.get("filters", {}))
         ctx.user_data["active_listings"] = results
         ctx.user_data["page"] = 0
         if not results:
@@ -205,7 +174,6 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         else:
             await show_listings(q, results, 0, title=f"✅ Найдено {len(results)} объектов")
         return
-
     if data.startswith("item_"):
         item_id = int(data.split("_")[1])
         item = next((x for x in LISTINGS if x["id"] == item_id), None)
@@ -224,34 +192,33 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         await q.edit_message_text(text, reply_markup=item_kb(item_id))
         return
-
     if data.startswith("request_"):
         item_id = int(data.split("_")[1])
         item = next((x for x in LISTINGS if x["id"] == item_id), None)
         name = item["title"] if item else "объект"
         await q.edit_message_text(
-            f"📩 Заявка на {name} отправлена!\n\n"
-            f"Менеджер свяжется с вами в ближайшее время.\n\n"
-            f"Или напишите сами: {MANAGER_TG}\n"
-            f"Телефон: {MANAGER_PHONE}",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")
-            ]])
+            f"📩 Заявка на {name} отправлена!\n\nМенеджер свяжется с вами в ближайшее время.\n\nИли напишите сами: {MANAGER_TG}\nТелефон: {MANAGER_PHONE}",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Главное меню", callback_data="main_menu")]])
         )
         return
 
 
 async def show_listings(q, listings, page, title="📋 Каталог объектов"):
-    text = f"{title}\nВсего объектов: {len(listings)}\n\nВыберите объект для подробной информации:"
+    text = f"{title}\nВсего объектов: {len(listings)}\n\nВыберите объект:"
     await q.edit_message_text(text, reply_markup=listings_kb(listings, page))
 
 
-def main():
+async def main():
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(callback_handler))
     print("Бот запущен!")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    await app.run_polling(allowed_updates=Update.ALL_TYPES)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
 
 
 if __name__ == "__main__":
